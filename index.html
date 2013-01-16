@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>D3 tutorial</title>
+  <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.6.3/jquery.js" type="text/javascript" charset="utf-8"></script>
+  <script src="http://mbostock.github.com/d3/d3.v2.min.js" type="text/javascript" charset="utf-8"></script>	
+  <script src="https://raw.github.com/mbostock/d3/master/lib/colorbrewer/colorbrewer.js"></script>
+  
+  <style type="text/css" media="screen">
+    body   { color: #666; background: #f3f3f3; font: Chalkboard, "Comic Sans", sans-serif; margin: 2em; }
+    h1, p  { font-weight: 300; text-shadow: #fff 0 1px 0; margin: 0 0 0 0; padding: 0; }
+    p.hint { margin-top: 0.25em; }
+    h1     { font-size: 28px; font-weight: normal; }
+    p      { font-size: 12px; }
+    a      { color: #666; }
+    .hidden      { display: none; }
+    div.tooltip  { color: #222; background: #fff; padding: .5em; text-shadow: #f5f5f5 0 1px 0;
+                   border-radius: 2px; box-shadow: 0px 0px 2px 0px #a6a6a6; opacity: 0.9; position: absolute; }
+    div.tooltip .sep { color: #444; font-weight: 300; }
+    path.state { fill: #e7eaef; stroke: none; }
+    text.legend  { fill: #242930; }
+    #container { width: 960px; }
+  </style>
+</head>
+<body>
+<header><h1>2000-2010 U.S. Electricity Prices</h1></header>
+<h1>Year Selected: <span class="year">2000</span></h1>
+<div id="container">
+</div>
+<footer>
+    <h1>Electricity Prices (<span class="year">2000</span>) in cents per kwH</h1>
+</footer>
+<script type="text/javascript" charset="utf-8">
+d3.csv("average_price_state_clean.csv", function(csv) {
+	var width  = 960;
+  var height = 550;
+
+  //define the 18 color regions for our data
+	var scale = colorbrewer.YlGn[9].reverse().concat(colorbrewer.YlOrRd[9]);
+
+	//create geo path 
+	var path = d3.geo.path();
+
+	//create svg element
+	var svg = d3.select("#container")
+  			.append("svg")
+  			.attr("width", width)
+  			.attr("height", height);
+
+	//create container for state's shape
+	var usa = svg.append("g")
+  				.attr("id", "states");
+
+  //create array of only years from our data
+  var years = d3.keys(csv[0])
+    	   		.filter(function(d) { return d.match(/^\d/); })
+    	   		.map(function(d) { return parseInt(d); });
+
+
+  // get maximum and minimum years
+	var min_year = d3.min(years);
+  var max_year = d3.max(years);
+
+  //default year when first load
+  var year = min_year;
+
+  // get only the values into an array to retrieve min and max values so we can get range for our color scale
+  var values = d3.merge(csv.map(function(d) { return d3.entries(d); }))
+                  .filter(function(d) { return d.key.match(/^\d/); })
+                	.map(function(d) { return d.value; })
+                	.map(function(d) { return parseFloat(d); })
+                  .filter(function(d) { return !isNaN(d); });
+
+  var min_value = d3.min(values);
+  var max_value = d3.max(values);
+
+  // Define color scale (from green to dark red -- low to high)
+  var color    = function() {
+                 return d3.scale.quantile()
+                 .domain([d3.min(values),d3.max(values)])
+                 .range(scale)
+              };
+
+
+  // return list of all state code and date for year selected
+  var data = function() {
+               return csv
+                 .reduce( function(previous, current, index) {
+                   previous[ current["State Code"] ] = parseFloat(current[year]);
+                   return previous;
+                 }, {})
+              };
+
+	//load state shape data downloaded from 
+	//http://eric.clst.org/wupl/Stuff/gz_2010_us_040_00_500k.json
+	d3.json("us-states.json", function(states) {
+    	//create paths for each state using json data
+    	//use geo path generator to draw the shape
+      	usa.selectAll("path")
+        	.data(states.features)
+          		.enter()
+          		.append("path")
+          		.attr("d", path)
+          		.attr("id", function(d,i) { return d.id; } )
+          		.attr("title", function(d,i) { return d.properties.name; })
+          		.classed("state", true); 
+
+	});
+
+	//legend
+  var legend = d3.select("svg").append("g").attr("id", "legend");
+
+  //tooltip (to display info when hovering over state)
+  var tooltip = d3.select("#container")
+                  .append("div")
+                  .attr("class", "tooltip");
+
+  //the update function 
+	var update = function() {
+		
+    //if user selected year past max, then reset to min.  If user select year below min, set to max 
+    if (year > max_year) year = min_year;
+		if (year < min_year) year = max_year;
+
+    //fill in the each state's shape with the corresponding color
+    d3.json("us-states.json", function(states) {
+    		usa.selectAll("path")
+    			.data(states.features)
+    			.transition()
+    				.duration(250)
+      			.style("fill",  function(d) { return data()[d.id] ? color()(data()[d.id]) : null; });
+    	});
+
+      //show year selected
+    	d3.selectAll("h1 .year").text(year);
+
+      //fill in the 18 color blocks
+    	var swatch = legend.selectAll("rect").data( color().copy().quantiles() );
+    	swatch
+     	.enter()
+      	.append("rect")
+      	.attr("width",  18)
+      	.attr("height", 18)
+      	.attr("x", function(d,i) { return i*18; })
+      	.attr("y", height - 25);
+    	swatch
+      	.style("fill", function(d,i) { return color()(d); });
+
+    	// update data above color blocks
+    	var label = legend.selectAll("text").data( color().copy().quantiles() );
+    	label
+     	.enter()
+      	.append("text")
+      	.classed("legend", true)
+      	.attr("x", function(d,i) { return 2 + i*18; })
+      	.attr("y", height - 29);
+    	label
+      	.text(function(d,i) { return d3.round(d); });
+
+      //update tooltip on mouseover 
+      d3.json("us-states.json", function(states) {
+          d3.selectAll("path")
+            .data(states.features)
+                .on("mousemove", function(d,i) {
+                    var mouse = d3.mouse(svg.node()).map( function(d) { return parseInt(d); } );
+
+                    tooltip
+                    .classed("hidden", false)
+                    .attr("style", "left:"+(mouse[0]+25)+"px;top:"+mouse[1]+"px")
+                    .html(d.properties.name+' <span class="sep">|</span> '+d3.round(data()[d.id], 1))
+                  })
+                .on("mouseout",  function(d,i) {
+                  tooltip.classed("hidden", true)
+                });
+      });
+
+	} 
+
+	// set year based on the left and right arrow keys and update map
+  d3.select(window).on("keydown", function() {
+    switch (d3.event.keyCode) {
+      case 37: year = parseInt(year)-1; update(); break;
+      case 39: year = parseInt(year)+1; update(); break;
+    }
+  });
+
+  // update map the first time we load
+  update();
+
+ });
+
+</script>
+</body>
+</html>
